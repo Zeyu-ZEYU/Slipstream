@@ -1,0 +1,131 @@
+// Slipstream wire protocol.
+//
+// Three kinds of traffic share one persistent connection per client
+// (Section 5, "Transport", and Appendix C):
+//
+//   client -> provider : HiddenState  (one per draft token, in stream order)
+//                        Verdict      (accepted positions; sent to continue a
+//                                      round and once at the end of a request)
+//   provider -> client : Output       (one per position the middle has run)
+//
+// The provider never receives a token identifier or a probability. A draft
+// token is identified only by its position in the round's tree and a pointer
+// to its parent, so the provider can reconstruct the tree's shape, run the
+// right attention mask, and apply a verdict, without learning any text.
+
+syntax = "proto3";
+
+package slipstream.v1;
+
+// Element precision of a hidden state's payload. The client chooses it from
+// the token's acceptance probability (Section 4.5) and also names the
+// precision at which it wants the output back.
+enum Precision {
+  PRECISION_UNSPECIFIED = 0;
+  PRECISION_BF16 = 1;  // 16 bits per element, exact path
+  PRECISION_FP8 = 2;   // E4M3 cast
+  PRECISION_FP4 = 3;   // block-scaled 4-bit floating point
+}
+
+// Traffic class. The transport keeps first-segment bytes ahead of background
+// bytes on the uplink, and foreground outputs ahead of background outputs on
+// the downlink (Section 4.4, "Priorities").
+enum TrafficClass {
+  TRAFFIC_CLASS_UNSPECIFIED = 0;
+  TRAFFIC_CLASS_FIRST_SEGMENT = 1;
+  TRAFFIC_CLASS_BACKGROUND = 2;
+}
+
+// One obfuscated hidden state, the output of the client's first layer for one
+// draft token.
+message HiddenState {
+  uint64 request_id = 1;
+  uint64 round_id = 2;
+  // Position of this draft token inside the round's tree. Position 0 is the
+  // round's root, the last accepted token, which travels with the first
+  // segment.
+  uint32 position = 3;
+  // Parent position inside the same round; the root points to itself. For the
+  // first hidden state of a new round, the parent pointer names the accepted
+  // leaf of the previous round, which is how a round closes without a verdict
+  // (Appendix C).
+  uint32 parent = 4;
+  // Set on the last hidden state of the first segment. It is the only marker
+  // the client sets; everything behind it is a background token, which the
+  // provider batches on its own (Section 4.2).
+  bool first_segment_end = 5;
+  TrafficClass traffic_class = 6;
+  // Precision of `payload`, and the precision the client wants for the output.
+  Precision payload_precision = 7;
+  Precision output_precision = 8;
+  // Encoded hidden state: bf16 little endian, FP8 E4M3, or block-scaled FP4
+  // (see slipstream/codec.py for the exact layouts).
+  bytes payload = 9;
+  // Number of elements, so the receiver can size the tensor without knowing
+  // the model.
+  uint32 num_elements = 10;
+  // Client clock, nanoseconds. Used only for the client's own accounting; the
+  // two sides never assume a common clock.
+  uint64 send_time_ns = 11;
+  // Round of the previous request state this hidden state closes, if any.
+  // Zero when there is nothing to commit.
+  uint64 commits_round_id = 12;
+}
+
+// One output of the middle for one position.
+message Output {
+  uint64 request_id = 1;
+  uint64 round_id = 2;
+  uint32 position = 3;
+  Precision payload_precision = 4;
+  bytes payload = 5;
+  uint32 num_elements = 6;
+  // Background tokens the provider will hold for this client at a time
+  // (Section 4.3, "Memory and the window"). Sent with every output.
+  uint32 window = 7;
+  // Hidden states of this client the provider has received so far, from which
+  // the client tells what is still in flight (Appendix C).
+  uint64 received_count = 8;
+  // Provider clock, nanoseconds: when the hidden state arrived and when the
+  // batch that ran it started. The client differences consecutive arrivals to
+  // estimate the uplink time per hidden state, which needs no clock
+  // synchronization (Section 4.4, "Inputs").
+  uint64 arrival_time_ns = 9;
+  uint64 batch_start_time_ns = 10;
+  TrafficClass traffic_class = 11;
+}
+
+// Positions the client has accepted.
+message Verdict {
+  uint64 request_id = 1;
+  uint64 round_id = 2;
+  // Newly accepted positions, in tree order.
+  repeated uint32 accepted = 3;
+  // True when the round continues on a streamed token: the provider runs
+  // whatever it has not yet run at and under the last accepted position and
+  // discards the rest (Section 4.2, "Branch continuation").
+  bool continue_round = 4;
+  // Set on the last verdict of a request, after which the provider releases
+  // the request's state.
+  bool end_of_request = 5;
+  uint64 send_time_ns = 6;
+}
+
+// A frame is whatever the gateway carries next on the connection.
+message Upstream {
+  oneof frame {
+    HiddenState hidden_state = 1;
+    Verdict verdict = 2;
+  }
+}
+
+message Downstream {
+  oneof frame {
+    Output output = 1;
+  }
+}
+
+// One bidirectional stream per client, for the lifetime of the connection.
+service Middle {
+  rpc Run(stream Upstream) returns (stream Downstream);
+}

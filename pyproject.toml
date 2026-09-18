@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slipstream"
+version = "0.1.0"
+description = "Streaming speculative decoding for split LLM inference over wide-area networks"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.4",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+models = ["transformers>=4.44", "safetensors>=0.4"]
+transport = ["grpcio>=1.60", "grpcio-tools>=1.60", "protobuf>=4.25"]
+figures = ["matplotlib>=3.7"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+slipstream-provider = "slipstream.provider.main:main"
+slipstream-client = "slipstream.client.main:main"
+
+[tool.setuptools.packages.find]
+include = ["slipstream*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

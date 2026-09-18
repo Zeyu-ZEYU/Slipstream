@@ -1,0 +1,79 @@
+# The router of Section 6.6.
+#
+# "A router in front of them, built on Envoy, sends every new request to the
+# provider with the fewest requests in flight and never moves it."
+#
+# Two things make that true here: LEAST_REQUEST over the eight provider
+# gateways, and a gRPC stream that lives for the whole connection, so once a
+# client's stream lands on a provider it stays there. The health checks take a
+# provider out of the pool only if it stops answering.
+#
+#   envoy -c deploy/envoy/envoy.yaml
+#
+# The clients then connect to the router instead of to a provider:
+#   deploy/client.sh --connect router.example:50151
+
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: middle
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 50151 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: middle
+                codec_type: HTTP2
+                # A hidden state is 8 KB and a stream lives for the request, so
+                # nothing here may buffer or time out mid-stream.
+                stream_idle_timeout: 0s
+                request_timeout: 0s
+                route_config:
+                  name: middle
+                  virtual_hosts:
+                    - name: middle
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/slipstream.v1.Middle/" }
+                          route:
+                            cluster: providers
+                            timeout: 0s
+                            idle_timeout: 0s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: providers
+      type: STRICT_DNS
+      connect_timeout: 1s
+      # Every new request goes to the provider with the fewest in flight.
+      lb_policy: LEAST_REQUEST
+      least_request_lb_config:
+        choice_count: 8
+      http2_protocol_options: {}
+      load_assignment:
+        cluster_name: providers
+        endpoints:
+          - lb_endpoints:
+              # Eight providers, one replica of the middle per GPU.
+              - endpoint: { address: { socket_address: { address: provider-0, port_value: 50151 } } }
+              - endpoint: { address: { socket_address: { address: provider-1, port_value: 50151 } } }
+              - endpoint: { address: { socket_address: { address: provider-2, port_value: 50151 } } }
+              - endpoint: { address: { socket_address: { address: provider-3, port_value: 50151 } } }
+              - endpoint: { address: { socket_address: { address: provider-4, port_value: 50151 } } }
+              - endpoint: { address: { socket_address: { address: provider-5, port_value: 50151 } } }
+              - endpoint: { address: { socket_address: { address: provider-6, port_value: 50151 } } }
+              - endpoint: { address: { socket_address: { address: provider-7, port_value: 50151 } } }
+      health_checks:
+        - timeout: 1s
+          interval: 5s
+          unhealthy_threshold: 3
+          healthy_threshold: 1
+          grpc_health_check: {}

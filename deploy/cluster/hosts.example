@@ -1,0 +1,12 @@
+# One line per machine, for deploy/cluster/launch_at_scale.sh.
+#
+# The run of Section 6.6 uses four nodes of eight GPUs: one node hosts eight
+# providers, one replica of the middle per GPU, and the other three host 24
+# clients, one per GPU, each on an emulated residential link.
+#
+#   role      host              gpus
+provider      node-0            8
+client        node-1            8
+client        node-2            8
+client        node-3            8
+router        node-0            0

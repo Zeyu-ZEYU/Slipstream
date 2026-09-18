@@ -1,0 +1,28 @@
+[package]
+name = "slipstream-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "Transport gateway for split LLM inference: shared memory to the engine, protocol buffers over gRPC to the other side"
+license = "MIT"
+
+[[bin]]
+name = "slipstream-gateway"
+path = "src/main.rs"
+
+[dependencies]
+tonic = { version = "0.12", features = ["tls", "tls-roots"] }
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tokio-stream = "0.1"
+futures = "0.3"
+memmap2 = "0.9"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+tempfile = "3"

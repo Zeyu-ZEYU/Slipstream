@@ -1,0 +1,15 @@
+# Core
+torch>=2.4
+numpy>=1.24
+# Split model loading from a Hugging Face checkpoint
+transformers>=4.44
+safetensors>=0.4
+# Wire protocol (Python transport; the Rust gateway needs no Python deps)
+grpcio>=1.60
+grpcio-tools>=1.60
+protobuf>=4.25
+# Experiment drivers and analysis
+pyyaml>=6.0
+matplotlib>=3.7
+# Tests
+pytest>=7.0
